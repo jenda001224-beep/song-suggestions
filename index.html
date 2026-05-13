@@ -318,6 +318,40 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       height: 100%; gap: 12px; color: #555; font-size: 1rem;
     }
+
+    .viral-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+    }
+    .viral-label { font-size: 0.88rem; font-weight: 600; color: #e8e8e8; }
+    .viral-hint { font-size: 0.75rem; color: #444; flex: 1; }
+
+    .toggle { position: relative; display: inline-block; flex-shrink: 0; cursor: pointer; }
+    .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      display: block;
+      width: 40px; height: 24px;
+      background: #2a2a2a;
+      border-radius: 99px;
+      transition: background 0.2s;
+      position: relative;
+    }
+    .toggle input:checked ~ .toggle-track { background: #fc3c44; }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 18px; height: 18px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
   </style>
 </head>
 <body>
@@ -337,6 +371,14 @@
     <div class="input-area" onclick="document.getElementById('songInput').focus()">
       <div class="song-tags" id="tags"></div>
       <input type="text" id="songInput" placeholder="Song name, press Enter…" autocomplete="off" />
+    </div>
+    <div class="viral-row">
+      <span class="viral-label">🔥 Viral mode</span>
+      <label class="toggle">
+        <input type="checkbox" id="viralToggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </label>
+      <span class="viral-hint">mixes in chart-topping songs</span>
     </div>
     <button class="primary" id="goBtn" disabled>Find songs →</button>
   </div>
@@ -524,26 +566,43 @@ extractBtn.addEventListener('click', async () => {
 });
 
 function parseSongsFromOCR(lines) {
-  // Filter out obvious non-song lines: pure numbers, timestamps, UI chrome, very short strings
-  const noise = /^(\d+[\s:.\d]*|shuffle|play|library|playlist|songs?|albums?|artists?|search|recently|added|time|more|see all|\.\.\.)$/i;
+  const uiNoise = /^(shuffle|play|playing|library|playlist|songs?|albums?|artists?|search|recently|added|time|more|see all|queue|next up|now playing|done|cancel|back|edit|delete|share|download|explicit|e|\.\.\.|lyrics|radio|connect|home|browse|for you|listen now|new music|top picks|recently played)$/i;
   const timelike = /^\d+:\d+$/;
-  const candidates = lines.filter(l =>
-    l.length > 3 &&
-    !noise.test(l) &&
-    !timelike.test(l) &&
-    !/^[0-9\s.,]+$/.test(l)
-  );
+  const onlySymbols = /^[^a-zA-Z0-9]+$/;                // lines with zero letters or digits
+  const tooManyGarbage = /[^\w\s\-'",!?.&()]/g;         // non-word chars beyond common punctuation
 
-  // Apple Music / Spotify screenshots typically alternate: song title, then artist
-  // Heuristic: lines that look like artist names are shorter and follow longer title lines
-  // We'll just dedupe and return all candidates — user can uncheck what they don't want
+  const cleaned = lines
+    .map(l => l.replace(/^\d+\.\s*/, '').trim())         // strip leading "1. " numbering
+    .filter(l => {
+      if (l.length < 4) return false;                    // too short
+      if (uiNoise.test(l)) return false;                 // UI chrome
+      if (timelike.test(l)) return false;                // timestamps like 3:42
+      if (onlySymbols.test(l)) return false;             // pure symbols
+      if (/^[0-9\s.,]+$/.test(l)) return false;          // pure numbers
+      const garbage = (l.match(tooManyGarbage) || []).length;
+      if (garbage / l.length > 0.3) return false;        // >30% weird chars = OCR noise
+      return true;
+    });
+
+  // Apple Music / Spotify layout: song title then artist name alternating.
+  // Song titles tend to be longer; artist lines are often shorter and follow a title.
+  // Take every other line starting with the first substantial one (skip the shorter follower).
+  const result = [];
   const seen = new Set();
-  return candidates.filter(l => {
-    const k = l.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  let i = 0;
+  while (i < cleaned.length) {
+    const current = cleaned[i];
+    const next = cleaned[i + 1];
+    // If next line is noticeably shorter, treat current as song title and skip next (artist)
+    if (next && next.length < current.length * 0.75) {
+      i += 2;
+    } else {
+      i += 1;
+    }
+    const k = current.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); result.push(current); }
+  }
+  return result;
 }
 
 function useSongsFromExtract() {
@@ -560,6 +619,26 @@ function useSongsFromExtract() {
 
   // Switch to the swipe view
   startSwipe();
+}
+
+// ── Viral / top charts ──
+async function fetchTopCharts() {
+  try {
+    const url = 'https://itunes.apple.com/us/rss/topsongs/limit=50/explicit=true/json';
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    const d = await r.json();
+    const entries = d?.feed?.entry || [];
+    return entries.map(e => ({
+      trackName: e['im:name']?.label,
+      artistName: e['im:artist']?.label,
+      artworkUrl100: e['im:image']?.[2]?.label,
+      trackViewUrl: e?.link?.[1]?.attributes?.href || e?.link?.[0]?.attributes?.href,
+      primaryGenreName: e?.category?.attributes?.label,
+      collectionName: e['im:collection']?.['im:name']?.label || '',
+    })).filter(t => t.trackName && t.artistName && t.trackViewUrl);
+  } catch { return []; }
 }
 
 // ── iTunes API ──
@@ -619,6 +698,12 @@ async function fetchInitial() {
   setProgress(80, `Finding ${[...genres].slice(0,2).join(', ')} songs…`);
   const genreRes = await Promise.all([...genres].map(g => itunesSearch(g, 20)));
   genreRes.forEach(r => addToQueue(r));
+
+  if (document.getElementById('viralToggle').checked) {
+    setProgress(90, 'Fetching viral charts…');
+    const top = await fetchTopCharts();
+    addToQueue(top);
+  }
 
   setProgress(100, `Found ${queue.length} songs!`);
   shuffle(queue);
