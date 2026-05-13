@@ -680,12 +680,13 @@ function buildCard(track) {
   return card;
 }
 
-function renderStack() {
+// Fill the stack to 3, adding new cards at the BACK so existing top card is undisturbed
+function replenish() {
   while (cards.length < 3 && queue.length > 0) {
     const track = queue.shift();
     const card = buildCard(track);
-    stage.insertBefore(card, stage.firstChild);
-    cards.unshift(card);
+    stage.insertBefore(card, stage.firstChild); // DOM back = lowest z-index
+    cards.push(card);                           // array back = back of stack
   }
 
   cards.forEach((c, i) => {
@@ -705,6 +706,29 @@ function renderStack() {
   } else if (cards.length <= 1 && !loadingMore) {
     fetchMore();
   }
+}
+
+// Initial stack build — cards added front-to-back
+function renderStack() {
+  while (cards.length < 3 && queue.length > 0) {
+    const track = queue.shift();
+    const card = buildCard(track);
+    stage.insertBefore(card, stage.firstChild);
+    cards.unshift(card);
+  }
+
+  cards.forEach((c, i) => {
+    c.style.zIndex = cards.length - i;
+    c.classList.remove('back', 'is-back-1', 'is-back-2');
+    if (i > 0) {
+      c.classList.add('back');
+      if (i === 1) c.classList.add('is-back-1');
+      if (i === 2) c.classList.add('is-back-2');
+    }
+  });
+
+  queueInfo.textContent = queue.length > 0 ? `${queue.length} more in queue` : '';
+  if (cards.length <= 1 && !loadingMore) fetchMore();
 }
 
 // ── Drag ──
@@ -774,20 +798,11 @@ function dismiss(action) {
 
   cards.shift();
 
-  cards.forEach((c, i) => {
-    c.classList.remove('back', 'is-back-1', 'is-back-2');
-    if (i > 0) {
-      c.classList.add('back');
-      if (i === 1) c.classList.add('is-back-1');
-      if (i === 2) c.classList.add('is-back-2');
-    }
-  });
+  // Immediately fill the stack — next card is already visible during the fly animation
+  replenish();
 
   card.classList.add(action === 'like' ? 'fly-right' : 'fly-left');
-  card.addEventListener('transitionend', () => {
-    card.remove();
-    renderStack();
-  }, { once: true });
+  card.addEventListener('transitionend', () => card.remove(), { once: true });
 }
 
 // ── Controls ──
