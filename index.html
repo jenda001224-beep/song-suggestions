@@ -778,7 +778,7 @@ async function fetchInitial() {
       const t = res[0];
       if (t.artistName) artists.add(t.artistName);
       if (t.primaryGenreName) genres.add(t.primaryGenreName);
-      res.forEach(r => seen.add(seenKey(r)));
+      seen.add(seenKey(t)); // only block the exact seed song, not all results
     }
   }
 
@@ -786,11 +786,11 @@ async function fetchInitial() {
   likedGenres = [...genres];
 
   setProgress(50, `Fetching songs by ${[...artists].slice(0,2).join(', ')}…`);
-  const artistRes = await Promise.all([...artists].map(a => itunesSearch(a, 20)));
+  const artistRes = await Promise.all([...artists].map(a => itunesSearch(a, 50)));
   artistRes.forEach(r => addToQueue(r));
 
   setProgress(80, `Finding ${[...genres].slice(0,2).join(', ')} songs…`);
-  const genreRes = await Promise.all([...genres].map(g => itunesSearch(g, 20)));
+  const genreRes = await Promise.all([...genres].map(g => itunesSearch(g, 50)));
   genreRes.forEach(r => addToQueue(r));
 
   const viralOn = document.getElementById('viralToggle').checked ||
