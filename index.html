@@ -400,7 +400,16 @@
 
     <div class="extracted-songs" id="extractedList" style="display:none"></div>
 
-    <button class="primary" id="extractBtn" disabled>Analyse screenshot →</button>
+    <div class="viral-row" style="margin-bottom:14px">
+      <span class="viral-label">🔥 Viral mode</span>
+      <label class="toggle">
+        <input type="checkbox" id="viralToggleScreenshot">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </label>
+      <span class="viral-hint">mixes in chart-topping songs</span>
+    </div>
+
+    <button class="primary" id="extractBtn" disabled>Read songs from screenshot →</button>
   </div>
 </div>
 
@@ -536,7 +545,9 @@ extractBtn.addEventListener('click', async () => {
       }
     });
 
-    const { data: { text } } = await worker.recognize(imageFile);
+    extractStatus.textContent = 'Preprocessing image…';
+    const cropped = await preprocessImage(imageFile);
+    const { data: { text } } = await worker.recognize(cropped);
     await worker.terminate();
 
     // Parse OCR output into song candidates
@@ -565,42 +576,57 @@ extractBtn.addEventListener('click', async () => {
   }
 });
 
+// Crop out album art (left) and menu dots (right) so Tesseract only sees song text
+function preprocessImage(file) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const leftPct  = 0.19;  // skip album art square (~19% of width)
+      const rightPct = 0.12;  // skip "..." button (~12% of width)
+      const x = Math.round(img.width * leftPct);
+      const w = Math.round(img.width * (1 - leftPct - rightPct));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, x, 0, w, img.height, 0, 0, w, img.height);
+      canvas.toBlob(resolve, 'image/png');
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function parseSongsFromOCR(lines) {
-  const uiNoise = /^(shuffle|play|playing|library|playlist|songs?|albums?|artists?|search|recently|added|time|more|see all|queue|next up|now playing|done|cancel|back|edit|delete|share|download|explicit|e|\.\.\.|lyrics|radio|connect|home|browse|for you|listen now|new music|top picks|recently played)$/i;
+  const uiNoise = /^(shuffle|play|playing|library|playlist|songs?|albums?|artists?|search|recently|added|time|more|see all|queue|next up|now playing|done|cancel|back|edit|delete|share|download|explicit|e|\.\.\.|lyrics|radio|connect|home|browse|for you|listen now|new music|top picks|recently played|\d+\s*songs?)$/i;
   const timelike = /^\d+:\d+$/;
-  const onlySymbols = /^[^a-zA-Z0-9]+$/;                // lines with zero letters or digits
-  const tooManyGarbage = /[^\w\s\-'",!?.&()]/g;         // non-word chars beyond common punctuation
+  const onlyNonAlpha = /^[^a-zA-Z]+$/;
 
   const cleaned = lines
-    .map(l => l.replace(/^\d+\.\s*/, '').trim())         // strip leading "1. " numbering
+    .map(l => l.replace(/\s*\[E\]\s*|\s*E\s*$/, '').trim())  // strip Explicit badge
+    .map(l => l.replace(/^\d+\.\s*/, '').trim())              // strip "1." numbering
     .filter(l => {
-      if (l.length < 4) return false;                    // too short
-      if (uiNoise.test(l)) return false;                 // UI chrome
-      if (timelike.test(l)) return false;                // timestamps like 3:42
-      if (onlySymbols.test(l)) return false;             // pure symbols
-      if (/^[0-9\s.,]+$/.test(l)) return false;          // pure numbers
-      const garbage = (l.match(tooManyGarbage) || []).length;
-      if (garbage / l.length > 0.3) return false;        // >30% weird chars = OCR noise
+      if (l.length < 3) return false;
+      if (uiNoise.test(l)) return false;
+      if (timelike.test(l)) return false;
+      if (onlyNonAlpha.test(l)) return false;
+      const alphaRatio = (l.match(/[a-zA-Z]/g) || []).length / l.length;
+      if (alphaRatio < 0.4) return false;  // mostly numbers/symbols = OCR garbage
       return true;
     });
 
-  // Apple Music / Spotify layout: song title then artist name alternating.
-  // Song titles tend to be longer; artist lines are often shorter and follow a title.
-  // Take every other line starting with the first substantial one (skip the shorter follower).
+  // Apple Music layout: title (longer/bolder) → artist (shorter) → title → artist…
+  // After cropping the image we get clean alternating pairs.
+  // Pick every title line, skip the artist line that follows.
   const result = [];
   const seen = new Set();
   let i = 0;
   while (i < cleaned.length) {
-    const current = cleaned[i];
-    const next = cleaned[i + 1];
-    // If next line is noticeably shorter, treat current as song title and skip next (artist)
-    if (next && next.length < current.length * 0.75) {
-      i += 2;
-    } else {
-      i += 1;
-    }
-    const k = current.toLowerCase();
-    if (!seen.has(k)) { seen.add(k); result.push(current); }
+    const title  = cleaned[i];
+    const artist = cleaned[i + 1];
+    // Artist line is typically shorter than the title
+    const skipNext = artist && artist.length <= title.length + 4;
+    const k = title.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); result.push(title); }
+    i += skipNext ? 2 : 1;
   }
   return result;
 }
@@ -699,7 +725,9 @@ async function fetchInitial() {
   const genreRes = await Promise.all([...genres].map(g => itunesSearch(g, 20)));
   genreRes.forEach(r => addToQueue(r));
 
-  if (document.getElementById('viralToggle').checked) {
+  const viralOn = document.getElementById('viralToggle').checked ||
+                  document.getElementById('viralToggleScreenshot').checked;
+  if (viralOn) {
     setProgress(90, 'Fetching viral charts…');
     const top = await fetchTopCharts();
     addToQueue(top);
