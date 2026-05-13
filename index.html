@@ -842,36 +842,61 @@ async function fetchTopCharts() {
   } catch { return []; }
 }
 
-// ── Music search — Deezer primary (reliable CORS on iOS), iTunes JSONP fallback ──
-async function itunesSearch(term, limit = 20) {
-  // Try Deezer first — proper CORS, no iOS restrictions
-  try {
-    const r = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(term)}&limit=${limit}`);
-    const d = await r.json();
-    if (d.data?.length) {
-      return d.data.map(t => ({
-        trackName: t.title,
-        artistName: t.artist.name,
-        artworkUrl100: t.album.cover_medium || t.album.cover,
-        artworkUrl60: t.album.cover,
-        previewUrl: t.preview,
-        collectionName: t.album.title,
-        trackViewUrl: `https://music.apple.com/search?term=${encodeURIComponent(t.title + ' ' + t.artist.name)}`,
-        primaryGenreName: null,
-      }));
-    }
-  } catch {}
-
-  // Fallback: iTunes via JSONP
+// ── Music search — iTunes fetch + JSONP in parallel, MusicBrainz as last resort ──
+function _itunesJsonp(term, limit) {
   return new Promise(resolve => {
-    const cb = '_it_' + Date.now();
+    const cb = '_it_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     const script = document.createElement('script');
-    const timer = setTimeout(() => { delete window[cb]; script.remove(); resolve([]); }, 8000);
+    const timer = setTimeout(() => { delete window[cb]; script.remove(); resolve([]); }, 7000);
     window[cb] = data => { clearTimeout(timer); delete window[cb]; script.remove(); resolve((data.results || []).map(normalizeItunes)); };
-    script.onerror = () => { clearTimeout(timer); delete window[cb]; resolve([]); };
+    script.onerror = () => { clearTimeout(timer); delete window[cb]; script.remove(); resolve([]); };
     script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}&callback=${cb}`;
     document.head.appendChild(script);
   });
+}
+
+function _firstNonEmpty(promises) {
+  return new Promise(resolve => {
+    let remaining = promises.length;
+    if (!remaining) { resolve([]); return; }
+    promises.forEach(p => Promise.resolve(p).then(r => {
+      if (r.length) resolve(r);
+      else if (--remaining === 0) resolve([]);
+    }).catch(() => { if (--remaining === 0) resolve([]); }));
+  });
+}
+
+async function itunesSearch(term, limit = 20) {
+  // Race iTunes direct fetch vs JSONP — whichever returns results first wins
+  const results = await _firstNonEmpty([
+    fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}`)
+      .then(r => r.json()).then(d => (d.results || []).map(normalizeItunes)).catch(() => []),
+    _itunesJsonp(term, limit),
+  ]);
+  if (results.length) return results;
+
+  // Last resort: MusicBrainz — proper CORS, works even when iTunes is blocked
+  try {
+    const r = await fetch(
+      `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(term)}&limit=${Math.min(limit, 100)}&fmt=json`,
+      { headers: { 'User-Agent': 'SongSuggestionsApp/1.0' } }
+    );
+    if (!r.ok) return [];
+    const d = await r.json();
+    return (d.recordings || []).map(rec => {
+      const artist = rec['artist-credit']?.[0]?.artist?.name || rec['artist-credit']?.[0]?.name || '';
+      return {
+        trackName: rec.title,
+        artistName: artist,
+        artworkUrl100: null,
+        artworkUrl60: null,
+        previewUrl: null,
+        collectionName: rec.releases?.[0]?.title || '',
+        trackViewUrl: `https://music.apple.com/search?term=${encodeURIComponent(rec.title + ' ' + artist)}`,
+        primaryGenreName: null,
+      };
+    });
+  } catch { return []; }
 }
 
 function normalizeItunes(t) {
