@@ -842,28 +842,27 @@ async function fetchTopCharts() {
   } catch { return []; }
 }
 
-// ── iTunes API (JSONP — works on iOS Safari) ──
+// ── iTunes API — runs fetch + JSONP in parallel, first one wins ──
 function itunesSearch(term, limit = 20) {
+  const baseUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}`;
+
   return new Promise(resolve => {
+    let done = false;
+    const finish = results => { if (!done) { done = true; resolve(results); } };
+
+    // 1. Fetch (fast in Chrome/Firefox)
+    fetch(baseUrl)
+      .then(r => r.json())
+      .then(d => finish(d.results || []))
+      .catch(() => {});
+
+    // 2. JSONP (works when fetch is blocked by iOS/content blockers)
     const cb = '_itunes_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     const script = document.createElement('script');
-    const timer = setTimeout(() => {
-      delete window[cb];
-      script.remove();
-      resolve([]);
-    }, 8000);
-    window[cb] = data => {
-      clearTimeout(timer);
-      delete window[cb];
-      script.remove();
-      resolve(data.results || []);
-    };
-    script.onerror = () => {
-      clearTimeout(timer);
-      delete window[cb];
-      resolve([]);
-    };
-    script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}&callback=${cb}`;
+    const timer = setTimeout(() => { delete window[cb]; script.remove(); finish([]); }, 8000);
+    window[cb] = data => { clearTimeout(timer); delete window[cb]; script.remove(); finish(data.results || []); };
+    script.onerror = () => { clearTimeout(timer); delete window[cb]; finish([]); };
+    script.src = baseUrl + `&callback=${cb}`;
     document.head.appendChild(script);
   });
 }
