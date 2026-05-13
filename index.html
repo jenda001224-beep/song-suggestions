@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Song Suggestions</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -342,11 +343,6 @@
 
   <!-- Screenshot tab -->
   <div id="screenshotTab">
-    <div class="api-field">
-      <label>Anthropic API key — needed to read your screenshot <a href="https://console.anthropic.com/keys" target="_blank" rel="noopener">Get one free →</a></label>
-      <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" />
-    </div>
-
     <div class="upload-zone" id="uploadZone">
       <input type="file" id="fileInput" accept="image/*" />
       <div class="zone-icon">🎵</div>
@@ -396,7 +392,6 @@ const nopeBtn = document.getElementById('nopeBtn');
 const likeBtn = document.getElementById('likeBtn');
 const queueInfo = document.getElementById('queueInfo');
 const backBtn = document.getElementById('backBtn');
-const apiKeyInput = document.getElementById('apiKey');
 const fileInput = document.getElementById('fileInput');
 const uploadZone = document.getElementById('uploadZone');
 const previewWrap = document.getElementById('previewWrap');
@@ -413,13 +408,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('#typeTab, #screenshotTab').forEach(t => t.classList.remove('active'));
     document.getElementById(btn.dataset.tab).classList.add('active');
   });
-});
-
-// ── API key persistence ──
-apiKeyInput.value = localStorage.getItem('anthropic_key') || '';
-apiKeyInput.addEventListener('input', () => {
-  localStorage.setItem('anthropic_key', apiKeyInput.value.trim());
-  updateExtractBtn();
 });
 
 // ── Seed songs (type tab) ──
@@ -452,105 +440,78 @@ songInput.addEventListener('keydown', e => {
 goBtn.addEventListener('click', () => startSwipe());
 
 // ── Screenshot tab ──
-let imageBase64 = null;
-
-function updateExtractBtn() {
-  extractBtn.disabled = !imageBase64 || !apiKeyInput.value.trim();
-}
+let imageFile = null;
 
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
 uploadZone.addEventListener('drop', e => {
   e.preventDefault();
   uploadZone.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file) loadImage(file);
+  if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]);
 });
 fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadImage(fileInput.files[0]); });
 
 document.getElementById('clearImg').addEventListener('click', () => {
-  imageBase64 = null;
+  imageFile = null;
   previewWrap.style.display = 'none';
   uploadZone.style.display = '';
   extractedList.style.display = 'none';
   extractStatus.textContent = '';
   fileInput.value = '';
-  updateExtractBtn();
+  extractBtn.disabled = true;
+  extractBtn.textContent = 'Read songs from screenshot →';
+  extractBtn.onclick = null;
 });
 
 function loadImage(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    const dataUrl = e.target.result;
-    imageBase64 = dataUrl.split(',')[1];
-    previewImg.src = dataUrl;
-    previewWrap.style.display = '';
-    uploadZone.style.display = 'none';
-    extractStatus.textContent = '';
-    extractedList.style.display = 'none';
-    updateExtractBtn();
-  };
-  reader.readAsDataURL(file);
+  imageFile = file;
+  previewImg.src = URL.createObjectURL(file);
+  previewWrap.style.display = '';
+  uploadZone.style.display = 'none';
+  extractStatus.textContent = '';
+  extractedList.style.display = 'none';
+  extractBtn.disabled = false;
 }
 
 extractBtn.addEventListener('click', async () => {
-  const key = apiKeyInput.value.trim();
-  if (!key || !imageBase64) return;
+  if (!imageFile) return;
 
   extractBtn.disabled = true;
   extractStatus.className = 'extract-status';
-  extractStatus.textContent = 'Analysing screenshot…';
+  extractStatus.textContent = 'Loading OCR engine…';
   extractedList.style.display = 'none';
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 }
-            },
-            {
-              type: 'text',
-              text: 'This is a screenshot of a music playlist. List every song you can see, one per line, in this exact format: Song Name - Artist Name. Only output the list, nothing else.'
-            }
-          ]
-        }]
-      })
+    const { createWorker } = Tesseract;
+    const worker = await createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round(m.progress * 100);
+          extractStatus.textContent = `Reading text… ${pct}%`;
+        } else if (m.status) {
+          extractStatus.textContent = m.status.charAt(0).toUpperCase() + m.status.slice(1) + '…';
+        }
+      }
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `API error ${res.status}`);
-    }
+    const { data: { text } } = await worker.recognize(imageFile);
+    await worker.terminate();
 
-    const data = await res.json();
-    const text = data.content?.[0]?.text || '';
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l && l.includes('-'));
+    // Parse OCR output into song candidates
+    const rawLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+    const songs = parseSongsFromOCR(rawLines);
 
-    if (!lines.length) throw new Error('No songs found in screenshot');
+    if (!songs.length) throw new Error('No songs found — try a clearer screenshot');
 
-    extractedList.innerHTML = lines.map((line, i) => `
+    extractedList.innerHTML = songs.map((s, i) => `
       <div class="song-row">
-        <input type="checkbox" id="ex${i}" value="${line.replace(/"/g, '&quot;')}" checked>
-        <label for="ex${i}" style="cursor:pointer">${line}</label>
+        <input type="checkbox" id="ex${i}" value="${s.replace(/"/g, '&quot;')}" checked>
+        <label for="ex${i}" style="cursor:pointer">${s}</label>
       </div>
     `).join('');
     extractedList.style.display = 'block';
-    extractStatus.textContent = `Found ${lines.length} songs — uncheck any to skip`;
+    extractStatus.textContent = `Found ${songs.length} songs — uncheck any to skip`;
 
-    // Replace go button with an "Use these songs" button
     extractBtn.textContent = 'Use these songs →';
     extractBtn.disabled = false;
     extractBtn.onclick = useSongsFromExtract;
@@ -562,6 +523,29 @@ extractBtn.addEventListener('click', async () => {
   }
 });
 
+function parseSongsFromOCR(lines) {
+  // Filter out obvious non-song lines: pure numbers, timestamps, UI chrome, very short strings
+  const noise = /^(\d+[\s:.\d]*|shuffle|play|library|playlist|songs?|albums?|artists?|search|recently|added|time|more|see all|\.\.\.)$/i;
+  const timelike = /^\d+:\d+$/;
+  const candidates = lines.filter(l =>
+    l.length > 3 &&
+    !noise.test(l) &&
+    !timelike.test(l) &&
+    !/^[0-9\s.,]+$/.test(l)
+  );
+
+  // Apple Music / Spotify screenshots typically alternate: song title, then artist
+  // Heuristic: lines that look like artist names are shorter and follow longer title lines
+  // We'll just dedupe and return all candidates — user can uncheck what they don't want
+  const seen = new Set();
+  return candidates.filter(l => {
+    const k = l.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 function useSongsFromExtract() {
   seeds.length = 0;
   extractedList.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
@@ -571,7 +555,7 @@ function useSongsFromExtract() {
   renderTags();
 
   // Reset extract btn
-  extractBtn.textContent = 'Analyse screenshot →';
+  extractBtn.textContent = 'Read songs from screenshot →';
   extractBtn.onclick = null;
 
   // Switch to the swipe view
@@ -846,7 +830,7 @@ backBtn.addEventListener('click', () => {
   likedGenres = [];
   activeDrag = false;
   goBtn.disabled = seeds.length === 0;
-  extractBtn.textContent = 'Analyse screenshot →';
+  extractBtn.textContent = 'Read songs from screenshot →';
   extractBtn.onclick = null;
 });
 </script>
