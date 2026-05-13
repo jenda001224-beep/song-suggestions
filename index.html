@@ -883,19 +883,21 @@ async function itunesSearch(term, limit = 20) {
     );
     if (!r.ok) return [];
     const d = await r.json();
-    return (d.recordings || []).map(rec => {
-      const artist = rec['artist-credit']?.[0]?.artist?.name || rec['artist-credit']?.[0]?.name || '';
-      return {
-        trackName: rec.title,
-        artistName: artist,
-        artworkUrl100: null,
-        artworkUrl60: null,
-        previewUrl: null,
-        collectionName: rec.releases?.[0]?.title || '',
-        trackViewUrl: `https://music.apple.com/search?term=${encodeURIComponent(rec.title + ' ' + artist)}`,
-        primaryGenreName: null,
-      };
-    });
+    return (d.recordings || [])
+      .sort((a, b) => (b.releases?.length || 0) - (a.releases?.length || 0))
+      .map(rec => {
+        const artist = rec['artist-credit']?.[0]?.artist?.name || rec['artist-credit']?.[0]?.name || '';
+        return {
+          trackName: rec.title,
+          artistName: artist,
+          artworkUrl100: null,
+          artworkUrl60: null,
+          previewUrl: null,
+          collectionName: rec.releases?.[0]?.title || '',
+          trackViewUrl: `https://music.apple.com/search?term=${encodeURIComponent(rec.title + ' ' + artist)}`,
+          primaryGenreName: null,
+        };
+      });
   } catch { return []; }
 }
 
