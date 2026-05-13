@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Song Suggestions</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d0d0d;
+      color: #e8e8e8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 36px 20px 60px;
+    }
+
+    /* ── Shared ── */
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #222;
+      border-top-color: #fc3c44;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    button.primary {
+      width: 100%;
+      background: #fc3c44;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button.primary:hover { background: #e0343b; }
+    button.primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Setup screen ── */
+    #setup { width: 100%; max-width: 480px; }
+
+    h1 { font-size: 1.7rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .subtitle { color: #555; font-size: 0.88rem; margin-bottom: 24px; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 18px;
+      gap: 4px;
+    }
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      border-radius: 9px;
+      padding: 9px 10px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #555;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .tab-btn.active { background: #2a2a2a; color: #e8e8e8; }
+
+    /* Type tab */
+    #typeTab, #screenshotTab { display: none; }
+    #typeTab.active, #screenshotTab.active { display: block; }
+
+    .input-area {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+      cursor: text;
+    }
+    .song-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
+    .tag {
+      background: #252525;
+      border: 1px solid #333;
+      border-radius: 20px;
+      padding: 4px 11px;
+      font-size: 0.82rem;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #ccc;
+    }
+    .tag button { background: none; border: none; color: #555; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
+    .tag button:hover { color: #bbb; }
+    #songInput {
+      width: 100%;
+      background: none;
+      border: none;
+      outline: none;
+      color: #e8e8e8;
+      font-size: 0.95rem;
+      font-family: inherit;
+      caret-color: #fc3c44;
+    }
+    #songInput::placeholder { color: #444; }
+
+    /* Screenshot tab */
+    .api-field {
+      margin-bottom: 14px;
+    }
+    .api-field label { display: block; font-size: 0.78rem; color: #555; margin-bottom: 6px; }
+    .api-field input {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 0.88rem;
+      color: #e8e8e8;
+      font-family: inherit;
+      outline: none;
+    }
+    .api-field input:focus { border-color: #444; }
+    .api-field a { color: #fc3c44; font-size: 0.75rem; text-decoration: none; }
+    .api-field a:hover { text-decoration: underline; }
+
+    .upload-zone {
+      border: 2px dashed #2a2a2a;
+      border-radius: 14px;
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 14px;
+      transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.dragover { border-color: #fc3c44; background: #1a1010; }
+    .upload-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-zone .zone-icon { font-size: 2.2rem; margin-bottom: 8px; }
+    .upload-zone .zone-text { color: #555; font-size: 0.88rem; }
+    .upload-zone .zone-text span { color: #fc3c44; }
+
+    .preview-wrap { position: relative; margin-bottom: 14px; }
+    .preview-img { width: 100%; border-radius: 12px; display: block; max-height: 260px; object-fit: cover; }
+    .preview-clear {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(0,0,0,0.7); border: none; color: #fff;
+      border-radius: 50%; width: 28px; height: 28px;
+      font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+
+    .extract-status { font-size: 0.82rem; color: #666; text-align: center; margin-bottom: 10px; min-height: 20px; }
+    .extract-status.error { color: #fc3c44; }
+
+    .extracted-songs {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .extracted-songs .song-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 0;
+      border-bottom: 1px solid #222;
+      font-size: 0.85rem;
+      color: #ccc;
+    }
+    .extracted-songs .song-row:last-child { border-bottom: none; }
+    .extracted-songs .song-row input[type="checkbox"] { accent-color: #fc3c44; flex-shrink: 0; }
+
+    /* ── Swipe screen ── */
+    #swipe { display: none; width: 100%; max-width: 400px; flex-direction: column; align-items: center; }
+
+    .card-stage {
+      position: relative;
+      width: 100%;
+      height: 520px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      position: absolute;
+      inset: 0;
+      background: #1a1a1a;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      user-select: none;
+      touch-action: none;
+      cursor: grab;
+      transform-origin: center bottom;
+    }
+    .card.back { pointer-events: none; }
+    .card.is-back-1 { transform: scale(0.95) translateY(10px); }
+    .card.is-back-2 { transform: scale(0.90) translateY(20px); }
+    .card.is-dragging { cursor: grabbing; }
+    .card.fly-right {
+      transition: transform 0.38s ease, opacity 0.38s ease !important;
+      transform: translateX(150%) rotate(22deg) !important;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .card.fly-left {
+      transition: transform 0.38s ease, opacity 0.38s ease !important;
+      transform: translateX(-150%) rotate(-22deg) !important;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .card-art {
+      width: 100%;
+      height: 300px;
+      object-fit: cover;
+      background: #111;
+      display: block;
+      pointer-events: none;
+      -webkit-user-drag: none;
+    }
+    .card-art-placeholder {
+      width: 100%;
+      height: 300px;
+      background: linear-gradient(135deg, #1e1e1e, #111);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 4rem;
+    }
+
+    .card-body { padding: 20px 22px; }
+    .card-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-artist { font-size: 0.88rem; color: #888; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-album { font-size: 0.78rem; color: #555; margin-bottom: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .card-links { display: flex; gap: 10px; }
+    .link-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-decoration: none;
+      font-family: inherit;
+      border: none;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: opacity 0.15s;
+    }
+    .link-btn:hover { opacity: 0.85; }
+    .link-apple { background: #fc3c44; color: #fff; }
+    .link-spotify { background: #1db954; color: #000; }
+
+    .like-label, .nope-label {
+      position: absolute;
+      top: 28px;
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      border: 3px solid;
+      border-radius: 8px;
+      padding: 4px 14px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .like-label { right: 24px; color: #3ddc84; border-color: #3ddc84; transform: rotate(15deg); }
+    .nope-label { left: 24px; color: #fc3c44; border-color: #fc3c44; transform: rotate(-15deg); }
+
+    .actions { display: flex; gap: 20px; align-items: center; margin-bottom: 14px; }
+    .act-btn {
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.7rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      -webkit-tap-highlight-color: transparent;
+      transition: transform 0.1s;
+    }
+    .act-btn:active { transform: scale(0.93); }
+    .btn-nope { background: #1e1e1e; color: #fc3c44; }
+    .btn-like { background: #1e1e1e; color: #3ddc84; }
+
+    .hint { font-size: 0.72rem; color: #333; text-align: center; margin-bottom: 18px; }
+    .queue-info { font-size: 0.72rem; color: #3a3a3a; margin-bottom: 10px; }
+
+    #backBtn {
+      background: none;
+      border: 1px solid #222;
+      color: #555;
+      border-radius: 10px;
+      padding: 8px 18px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #backBtn:hover { border-color: #444; color: #aaa; }
+
+    .done-card {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      height: 100%; gap: 12px; color: #555; font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Setup -->
+<div id="setup">
+  <h1>Song Suggestions</h1>
+  <p class="subtitle">Type songs you like or upload a playlist screenshot</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="typeTab">✏️ Type songs</button>
+    <button class="tab-btn" data-tab="screenshotTab">📸 Screenshot</button>
+  </div>
+
+  <!-- Type tab -->
+  <div id="typeTab" class="active">
+    <div class="input-area" onclick="document.getElementById('songInput').focus()">
+      <div class="song-tags" id="tags"></div>
+      <input type="text" id="songInput" placeholder="Song name, press Enter…" autocomplete="off" />
+    </div>
+    <button class="primary" id="goBtn" disabled>Find songs →</button>
+  </div>
+
+  <!-- Screenshot tab -->
+  <div id="screenshotTab">
+    <div class="api-field">
+      <label>Anthropic API key — needed to read your screenshot <a href="https://console.anthropic.com/keys" target="_blank" rel="noopener">Get one free →</a></label>
+      <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" />
+    </div>
+
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept="image/*" />
+      <div class="zone-icon">🎵</div>
+      <div class="zone-text">Drop a screenshot here or <span>browse</span></div>
+    </div>
+
+    <div class="preview-wrap" id="previewWrap" style="display:none">
+      <img id="previewImg" class="preview-img" />
+      <button class="preview-clear" id="clearImg">×</button>
+    </div>
+
+    <p class="extract-status" id="extractStatus"></p>
+
+    <div class="extracted-songs" id="extractedList" style="display:none"></div>
+
+    <button class="primary" id="extractBtn" disabled>Analyse screenshot →</button>
+  </div>
+</div>
+
+<!-- Swipe -->
+<div id="swipe">
+  <div class="card-stage" id="stage"></div>
+  <p class="queue-info" id="queueInfo"></p>
+  <div class="actions">
+    <button class="act-btn btn-nope" id="nopeBtn">✕</button>
+    <button class="act-btn btn-like" id="likeBtn">♥</button>
+  </div>
+  <p class="hint">Swipe or use ← → keys · Tap links to open</p>
+  <button id="backBtn">← Start over</button>
+</div>
+
+<script>
+// ── State ──
+const seeds = [];
+let queue = [], seen = new Set(), likedArtists = [], likedGenres = [], loadingMore = false;
+let cards = [];
+let activeDrag = false;
+
+// ── DOM refs ──
+const setupEl = document.getElementById('setup');
+const swipeEl = document.getElementById('swipe');
+const tagsEl = document.getElementById('tags');
+const songInput = document.getElementById('songInput');
+const goBtn = document.getElementById('goBtn');
+const stage = document.getElementById('stage');
+const nopeBtn = document.getElementById('nopeBtn');
+const likeBtn = document.getElementById('likeBtn');
+const queueInfo = document.getElementById('queueInfo');
+const backBtn = document.getElementById('backBtn');
+const apiKeyInput = document.getElementById('apiKey');
+const fileInput = document.getElementById('fileInput');
+const uploadZone = document.getElementById('uploadZone');
+const previewWrap = document.getElementById('previewWrap');
+const previewImg = document.getElementById('previewImg');
+const extractStatus = document.getElementById('extractStatus');
+const extractedList = document.getElementById('extractedList');
+const extractBtn = document.getElementById('extractBtn');
+
+// ── Tabs ──
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#typeTab, #screenshotTab').forEach(t => t.classList.remove('active'));
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ── API key persistence ──
+apiKeyInput.value = localStorage.getItem('anthropic_key') || '';
+apiKeyInput.addEventListener('input', () => {
+  localStorage.setItem('anthropic_key', apiKeyInput.value.trim());
+  updateExtractBtn();
+});
+
+// ── Seed songs (type tab) ──
+function renderTags() {
+  tagsEl.innerHTML = '';
+  seeds.forEach((s, i) => {
+    const tag = document.createElement('div');
+    tag.className = 'tag';
+    tag.innerHTML = `<span>${s}</span><button onclick="removeSeed(${i})">×</button>`;
+    tagsEl.appendChild(tag);
+  });
+  goBtn.disabled = seeds.length === 0;
+}
+window.removeSeed = (i) => { seeds.splice(i, 1); renderTags(); };
+
+songInput.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ',') && songInput.value.trim()) {
+    e.preventDefault();
+    const val = songInput.value.trim().replace(/,$/, '');
+    if (val && !seeds.includes(val)) seeds.push(val);
+    songInput.value = '';
+    renderTags();
+  }
+  if (e.key === 'Backspace' && songInput.value === '' && seeds.length) {
+    seeds.pop();
+    renderTags();
+  }
+});
+
+goBtn.addEventListener('click', () => startSwipe());
+
+// ── Screenshot tab ──
+let imageBase64 = null;
+
+function updateExtractBtn() {
+  extractBtn.disabled = !imageBase64 || !apiKeyInput.value.trim();
+}
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) loadImage(file);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadImage(fileInput.files[0]); });
+
+document.getElementById('clearImg').addEventListener('click', () => {
+  imageBase64 = null;
+  previewWrap.style.display = 'none';
+  uploadZone.style.display = '';
+  extractedList.style.display = 'none';
+  extractStatus.textContent = '';
+  fileInput.value = '';
+  updateExtractBtn();
+});
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    imageBase64 = dataUrl.split(',')[1];
+    previewImg.src = dataUrl;
+    previewWrap.style.display = '';
+    uploadZone.style.display = 'none';
+    extractStatus.textContent = '';
+    extractedList.style.display = 'none';
+    updateExtractBtn();
+  };
+  reader.readAsDataURL(file);
+}
+
+extractBtn.addEventListener('click', async () => {
+  const key = apiKeyInput.value.trim();
+  if (!key || !imageBase64) return;
+
+  extractBtn.disabled = true;
+  extractStatus.className = 'extract-status';
+  extractStatus.textContent = 'Analysing screenshot…';
+  extractedList.style.display = 'none';
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 }
+            },
+            {
+              type: 'text',
+              text: 'This is a screenshot of a music playlist. List every song you can see, one per line, in this exact format: Song Name - Artist Name. Only output the list, nothing else.'
+            }
+          ]
+        }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
+    }
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l && l.includes('-'));
+
+    if (!lines.length) throw new Error('No songs found in screenshot');
+
+    extractedList.innerHTML = lines.map((line, i) => `
+      <div class="song-row">
+        <input type="checkbox" id="ex${i}" value="${line.replace(/"/g, '&quot;')}" checked>
+        <label for="ex${i}" style="cursor:pointer">${line}</label>
+      </div>
+    `).join('');
+    extractedList.style.display = 'block';
+    extractStatus.textContent = `Found ${lines.length} songs — uncheck any to skip`;
+
+    // Replace go button with an "Use these songs" button
+    extractBtn.textContent = 'Use these songs →';
+    extractBtn.disabled = false;
+    extractBtn.onclick = useSongsFromExtract;
+
+  } catch (err) {
+    extractStatus.className = 'extract-status error';
+    extractStatus.textContent = err.message;
+    extractBtn.disabled = false;
+  }
+});
+
+function useSongsFromExtract() {
+  seeds.length = 0;
+  extractedList.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+    const song = cb.value.split(' - ')[0].trim();
+    if (song && !seeds.includes(song)) seeds.push(song);
+  });
+  renderTags();
+
+  // Reset extract btn
+  extractBtn.textContent = 'Analyse screenshot →';
+  extractBtn.onclick = null;
+
+  // Switch to the swipe view
+  startSwipe();
+}
+
+// ── iTunes API ──
+async function itunesSearch(term, limit = 20) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    const d = await r.json();
+    return d.results || [];
+  } catch { return []; }
+  finally { clearTimeout(timer); }
+}
+
+function spotifyUrl(track, artist) {
+  return `https://open.spotify.com/search/${encodeURIComponent(track + ' ' + artist)}`;
+}
+
+// ── Queue ──
+function seenKey(t) { return `${t.trackName}|||${t.artistName}`.toLowerCase(); }
+function addToQueue(tracks) {
+  for (const t of tracks) {
+    const k = seenKey(t);
+    if (!seen.has(k) && t.trackViewUrl) { seen.add(k); queue.push(t); }
+  }
+}
+
+function setProgress(pct, msg) {
+  const bar = document.getElementById('loadBar');
+  const st = document.getElementById('loadStatus');
+  if (bar) bar.style.width = pct + '%';
+  if (st) st.textContent = msg;
+}
+
+async function fetchInitial() {
+  const artists = new Set(), genres = new Set();
+
+  for (let i = 0; i < seeds.length; i++) {
+    setProgress(Math.round((i / seeds.length) * 40), `Looking up "${seeds[i]}"…`);
+    const res = await itunesSearch(seeds[i], 5);
+    if (res.length) {
+      const t = res[0];
+      if (t.artistName) artists.add(t.artistName);
+      if (t.primaryGenreName) genres.add(t.primaryGenreName);
+      res.forEach(r => seen.add(seenKey(r)));
+    }
+  }
+
+  likedArtists = [...artists];
+  likedGenres = [...genres];
+
+  setProgress(50, `Fetching songs by ${[...artists].slice(0,2).join(', ')}…`);
+  const artistRes = await Promise.all([...artists].map(a => itunesSearch(a, 20)));
+  artistRes.forEach(r => addToQueue(r));
+
+  setProgress(80, `Finding ${[...genres].slice(0,2).join(', ')} songs…`);
+  const genreRes = await Promise.all([...genres].map(g => itunesSearch(g, 20)));
+  genreRes.forEach(r => addToQueue(r));
+
+  setProgress(100, `Found ${queue.length} songs!`);
+  shuffle(queue);
+  await new Promise(r => setTimeout(r, 350));
+}
+
+async function fetchMore() {
+  if (loadingMore) return;
+  loadingMore = true;
+  const sources = [...likedArtists, ...likedGenres].slice(0, 6);
+  const res = await Promise.all(sources.map(s => itunesSearch(s, 20)));
+  res.forEach(r => addToQueue(r));
+  shuffle(queue);
+  loadingMore = false;
+  renderStack();
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+// ── Cards ──
+function buildCard(track) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  const artUrl = (track.artworkUrl100 || '').replace('100x100', '600x600');
+
+  card.innerHTML = `
+    ${artUrl ? `<img class="card-art" src="${artUrl}" alt="">` : `<div class="card-art-placeholder">🎵</div>`}
+    <div class="like-label">LIKE</div>
+    <div class="nope-label">NOPE</div>
+    <div class="card-body">
+      <div class="card-title">${track.trackName}</div>
+      <div class="card-artist">${track.artistName}</div>
+      <div class="card-album">${track.collectionName || ''}</div>
+      <div class="card-links">
+        <a class="link-btn link-apple" href="${track.trackViewUrl}" target="_blank" rel="noopener">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M10 5.2 7.5 6.6V4.5L6.5 5.1v5.4l1-.65V7.55l2.5 1.45V7.4L7.5 6.35 10 4.9V5.2z" fill="white"/></svg>
+          Apple Music
+        </a>
+        <a class="link-btn link-spotify" href="${spotifyUrl(track.trackName, track.artistName)}" target="_blank" rel="noopener">
+          <svg width="13" height="13" viewBox="0 0 13 13"><circle cx="6.5" cy="6.5" r="6.5" fill="rgba(0,0,0,0.15)"/><path d="M9.1 8.7a.4.4 0 0 1-.56.12C7.13 7.85 5.6 7.68 3.8 8.1a.4.4 0 1 1-.18-.78c2-.46 3.68-.26 5.36.72a.4.4 0 0 1 .12.66zm.56-1.4a.5.5 0 0 1-.7.17C7.06 6.35 5.1 6.1 3.6 6.56a.5.5 0 0 1-.32-.95c1.7-.52 3.84-.26 5.62.83a.5.5 0 0 1 .16.86zm.06-1.46C7.5 4.72 5.1 4.63 3.57 5.1a.6.6 0 1 1-.35-1.15c1.78-.54 4.74-.44 6.62.74a.6.6 0 1 1-.68 1z" fill="black"/></svg>
+          Spotify
+        </a>
+      </div>
+    </div>
+  `;
+
+  card.querySelectorAll('a').forEach(a => {
+    a.addEventListener('pointerdown', e => e.stopPropagation());
+    a.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+  });
+
+  card._track = track;
+  makeDraggable(card);
+  return card;
+}
+
+function renderStack() {
+  while (cards.length < 3 && queue.length > 0) {
+    const track = queue.shift();
+    const card = buildCard(track);
+    stage.insertBefore(card, stage.firstChild);
+    cards.unshift(card);
+  }
+
+  cards.forEach((c, i) => {
+    c.style.zIndex = cards.length - i;
+    c.classList.remove('back', 'is-back-1', 'is-back-2');
+    if (i > 0) {
+      c.classList.add('back');
+      if (i === 1) c.classList.add('is-back-1');
+      if (i === 2) c.classList.add('is-back-2');
+    }
+  });
+
+  queueInfo.textContent = queue.length > 0 ? `${queue.length} more in queue` : '';
+
+  if (cards.length === 0) {
+    stage.innerHTML = '<div class="done-card"><div style="font-size:2.5rem">🎵</div><div>No more suggestions</div></div>';
+  } else if (cards.length <= 1 && !loadingMore) {
+    fetchMore();
+  }
+}
+
+// ── Drag ──
+function makeDraggable(card) {
+  let startX = 0, startY = 0, curX = 0, isDragging = false;
+
+  function onDown(e) {
+    if (card.classList.contains('back')) return;
+    if (e.target.closest('a')) return;
+    if (activeDrag) return;
+    activeDrag = true;
+    isDragging = true;
+    startX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    startY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    curX = 0;
+    card.classList.add('is-dragging');
+    card.style.transition = 'none';
+  }
+
+  function onMove(e) {
+    if (!isDragging) return;
+    const x = e.clientX ?? e.touches?.[0]?.clientX ?? startX;
+    const y = e.clientY ?? e.touches?.[0]?.clientY ?? startY;
+    curX = x - startX;
+    const curY = y - startY;
+    card.style.transform = `translateX(${curX}px) translateY(${curY * 0.25}px) rotate(${curX * 0.055}deg)`;
+    const p = Math.min(Math.abs(curX) / 80, 1);
+    card.querySelector('.like-label').style.opacity = curX > 0 ? p : 0;
+    card.querySelector('.nope-label').style.opacity = curX < 0 ? p : 0;
+  }
+
+  function onUp() {
+    if (!isDragging) return;
+    isDragging = false;
+    activeDrag = false;
+    card.classList.remove('is-dragging');
+    card.style.transition = '';
+    if (Math.abs(curX) > 80) {
+      dismiss(curX > 0 ? 'like' : 'nope');
+    } else {
+      card.style.transform = '';
+      card.querySelector('.like-label').style.opacity = 0;
+      card.querySelector('.nope-label').style.opacity = 0;
+    }
+  }
+
+  card.addEventListener('pointerdown', onDown);
+  card.addEventListener('pointermove', onMove);
+  card.addEventListener('pointerup', onUp);
+  card.addEventListener('pointercancel', onUp);
+}
+
+function dismiss(action) {
+  if (cards.length === 0) return;
+  const card = cards[0];
+
+  if (action === 'like' && card._track) {
+    const t = card._track;
+    if (t.artistName && !likedArtists.includes(t.artistName)) {
+      likedArtists.push(t.artistName);
+      fetchMore();
+    }
+    if (t.primaryGenreName && !likedGenres.includes(t.primaryGenreName)) {
+      likedGenres.push(t.primaryGenreName);
+    }
+  }
+
+  cards.shift();
+
+  cards.forEach((c, i) => {
+    c.classList.remove('back', 'is-back-1', 'is-back-2');
+    if (i > 0) {
+      c.classList.add('back');
+      if (i === 1) c.classList.add('is-back-1');
+      if (i === 2) c.classList.add('is-back-2');
+    }
+  });
+
+  card.classList.add(action === 'like' ? 'fly-right' : 'fly-left');
+  card.addEventListener('transitionend', () => {
+    card.remove();
+    renderStack();
+  }, { once: true });
+}
+
+// ── Controls ──
+nopeBtn.addEventListener('click', () => dismiss('nope'));
+likeBtn.addEventListener('click', () => dismiss('like'));
+document.addEventListener('keydown', e => {
+  if (!swipeEl.style.display || swipeEl.style.display === 'none') return;
+  if (e.key === 'ArrowRight') dismiss('like');
+  if (e.key === 'ArrowLeft') dismiss('nope');
+});
+
+// ── Start swipe ──
+async function startSwipe() {
+  setupEl.style.display = 'none';
+  swipeEl.style.display = 'flex';
+
+  stage.innerHTML = `
+    <div class="card" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;padding:40px">
+      <div class="spinner"></div>
+      <div id="loadStatus" style="color:#888;font-size:.85rem;text-align:center">Starting…</div>
+      <div style="width:100%;background:#222;border-radius:99px;height:4px;overflow:hidden">
+        <div id="loadBar" style="height:100%;width:0%;background:#fc3c44;border-radius:99px;transition:width 0.35s ease"></div>
+      </div>
+    </div>`;
+
+  await fetchInitial();
+  stage.innerHTML = '';
+  renderStack();
+}
+
+// ── Back ──
+backBtn.addEventListener('click', () => {
+  swipeEl.style.display = 'none';
+  setupEl.style.display = 'block';
+  stage.innerHTML = '';
+  cards = [];
+  queue = [];
+  seen = new Set();
+  likedArtists = [];
+  likedGenres = [];
+  activeDrag = false;
+  goBtn.disabled = seeds.length === 0;
+  extractBtn.textContent = 'Analyse screenshot →';
+  extractBtn.onclick = null;
+});
+</script>
+</body>
+</html>
