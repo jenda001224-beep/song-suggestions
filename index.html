@@ -602,7 +602,7 @@ function renderAc() {
     </div>
   `).join('');
   acEl.querySelectorAll('.ac-item').forEach(el => {
-    el.addEventListener('mousedown', e => {
+    el.addEventListener('pointerdown', e => {
       e.preventDefault();
       addSeed(acResults[+el.dataset.i].trackName);
     });
