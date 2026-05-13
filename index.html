@@ -399,6 +399,41 @@
       transition: transform 0.2s;
     }
     .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
+
+    .input-wrap { position: relative; }
+    .autocomplete {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0; right: 0;
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 12px;
+      overflow: hidden;
+      z-index: 100;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    }
+    .ac-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: background 0.1s;
+      border-bottom: 1px solid #252525;
+    }
+    .ac-item:last-child { border-bottom: none; }
+    .ac-item:hover, .ac-item.focused { background: #2a2a2a; }
+    .ac-art {
+      width: 36px; height: 36px;
+      border-radius: 5px;
+      object-fit: cover;
+      background: #111;
+      flex-shrink: 0;
+    }
+    .ac-info { flex: 1; min-width: 0; }
+    .ac-title { font-size: 0.88rem; font-weight: 600; color: #e8e8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ac-artist { font-size: 0.75rem; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ac-searching { padding: 12px 14px; font-size: 0.82rem; color: #555; text-align: center; }
   </style>
 </head>
 <body>
@@ -415,9 +450,12 @@
 
   <!-- Type tab -->
   <div id="typeTab" class="active">
-    <div class="input-area" onclick="document.getElementById('songInput').focus()">
-      <div class="song-tags" id="tags"></div>
-      <input type="text" id="songInput" placeholder="Song name, press Enter…" autocomplete="off" />
+    <div class="input-wrap">
+      <div class="input-area" onclick="document.getElementById('songInput').focus()">
+        <div class="song-tags" id="tags"></div>
+        <input type="text" id="songInput" placeholder="Search for a song…" autocomplete="off" />
+      </div>
+      <div class="autocomplete" id="autocomplete" style="display:none"></div>
     </div>
     <div class="viral-row">
       <span class="viral-label">🔥 Viral mode</span>
@@ -527,19 +565,84 @@ function renderTags() {
 }
 window.removeSeed = (i) => { seeds.splice(i, 1); renderTags(); };
 
+// ── Autocomplete ──
+const acEl = document.getElementById('autocomplete');
+let acResults = [];
+let acFocused = -1;
+let acDebounce = null;
+
+function addSeed(name) {
+  if (name && !seeds.includes(name)) seeds.push(name);
+  songInput.value = '';
+  hideAc();
+  renderTags();
+  songInput.focus();
+}
+
+function hideAc() {
+  acEl.style.display = 'none';
+  acResults = [];
+  acFocused = -1;
+}
+
+function renderAc() {
+  if (!acResults.length) { hideAc(); return; }
+  acEl.style.display = '';
+  acEl.innerHTML = acResults.map((t, i) => `
+    <div class="ac-item${i === acFocused ? ' focused' : ''}" data-i="${i}">
+      ${t.artworkUrl60 ? `<img class="ac-art" src="${t.artworkUrl60}" loading="lazy">` : '<div class="ac-art"></div>'}
+      <div class="ac-info">
+        <div class="ac-title">${t.trackName}</div>
+        <div class="ac-artist">${t.artistName}</div>
+      </div>
+    </div>
+  `).join('');
+  acEl.querySelectorAll('.ac-item').forEach(el => {
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      addSeed(acResults[+el.dataset.i].trackName);
+    });
+  });
+}
+
+songInput.addEventListener('input', () => {
+  const q = songInput.value.trim();
+  clearTimeout(acDebounce);
+  if (q.length < 2) { hideAc(); return; }
+  acEl.style.display = '';
+  acEl.innerHTML = '<div class="ac-searching">Searching…</div>';
+  acDebounce = setTimeout(async () => {
+    const res = await itunesSearch(q, 8);
+    acResults = res;
+    acFocused = -1;
+    renderAc();
+  }, 300);
+});
+
 songInput.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ',') && songInput.value.trim()) {
+  if (acResults.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
     e.preventDefault();
-    const val = songInput.value.trim().replace(/,$/, '');
-    if (val && !seeds.includes(val)) seeds.push(val);
-    songInput.value = '';
-    renderTags();
+    acFocused = (acFocused + (e.key === 'ArrowDown' ? 1 : -1) + acResults.length) % acResults.length;
+    renderAc();
+    return;
   }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (acFocused >= 0 && acResults[acFocused]) {
+      addSeed(acResults[acFocused].trackName);
+    } else if (songInput.value.trim()) {
+      addSeed(songInput.value.trim());
+    }
+    return;
+  }
+  if (e.key === 'Escape') { hideAc(); return; }
   if (e.key === 'Backspace' && songInput.value === '' && seeds.length) {
     seeds.pop();
     renderTags();
   }
 });
+
+songInput.addEventListener('blur', () => setTimeout(hideAc, 150));
 
 goBtn.addEventListener('click', () => startSwipe());
 
