@@ -314,6 +314,53 @@
     }
     #backBtn:hover { border-color: #444; color: #aaa; }
 
+    #muteBtn {
+      background: none;
+      border: 1px solid #222;
+      color: #555;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.88rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #muteBtn:hover { border-color: #444; }
+
+    .liked-list {
+      position: absolute;
+      inset: 0;
+      background: #1a1a1a;
+      border-radius: 20px;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    .liked-list h2 { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: 16px; }
+    .liked-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #222;
+    }
+    .liked-row:last-child { border-bottom: none; }
+    .liked-info { flex: 1; min-width: 0; }
+    .liked-title { font-size: 0.88rem; font-weight: 600; color: #e8e8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .liked-artist { font-size: 0.75rem; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .copy-btn {
+      background: #252525;
+      border: 1px solid #333;
+      color: #aaa;
+      border-radius: 7px;
+      padding: 5px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      font-family: inherit;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: #333; color: #fff; }
+    .copy-btn.copied { color: #3ddc84; border-color: #3ddc84; }
+
     .done-card {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       height: 100%; gap: 12px; color: #555; font-size: 1rem;
@@ -422,7 +469,10 @@
     <button class="act-btn btn-like" id="likeBtn">♥</button>
   </div>
   <p class="hint">Swipe or use ← → keys · Tap links to open</p>
-  <button id="backBtn">← Start over</button>
+  <div style="display:flex;gap:12px;align-items:center">
+    <button id="backBtn">← Start over</button>
+    <button id="muteBtn" title="Mute preview">🔊</button>
+  </div>
 </div>
 
 <script>
@@ -431,6 +481,9 @@ const seeds = [];
 let queue = [], seen = new Set(), likedArtists = [], likedGenres = [], loadingMore = false;
 let cards = [];
 let activeDrag = false;
+let likedSongs = [];
+let currentAudio = null;
+let audioMuted = false;
 
 // ── DOM refs ──
 const setupEl = document.getElementById('setup');
@@ -756,6 +809,47 @@ function shuffle(arr) {
   }
 }
 
+// ── Audio preview ──
+function playPreview(track) {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if (!track?.previewUrl || audioMuted) return;
+  currentAudio = new Audio(track.previewUrl);
+  currentAudio.volume = 0.6;
+  currentAudio.play().catch(() => {});
+}
+
+function stopPreview() {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+}
+
+// ── Liked songs screen ──
+function showLikedSongs() {
+  stopPreview();
+  if (!likedSongs.length) {
+    stage.innerHTML = '<div class="done-card"><div style="font-size:2.5rem">🎵</div><div>No more suggestions</div></div>';
+    return;
+  }
+  const rows = likedSongs.map((t, i) => `
+    <div class="liked-row">
+      <div class="liked-info">
+        <div class="liked-title">${t.trackName}</div>
+        <div class="liked-artist">${t.artistName}</div>
+      </div>
+      <button class="copy-btn" onclick="copyLiked(this, ${i})">Copy</button>
+    </div>
+  `).join('');
+  stage.innerHTML = `<div class="liked-list"><h2>❤️ Songs you liked (${likedSongs.length})</h2>${rows}</div>`;
+}
+
+window.copyLiked = (btn, i) => {
+  const t = likedSongs[i];
+  navigator.clipboard.writeText(`${t.trackName} — ${t.artistName}`).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+};
+
 // ── Cards ──
 function buildCard(track) {
   const card = document.createElement('div');
@@ -771,7 +865,7 @@ function buildCard(track) {
       <div class="card-artist">${track.artistName}</div>
       <div class="card-album">${track.collectionName || ''}</div>
       <div class="card-links">
-        <a class="link-btn link-apple" href="${track.trackViewUrl}" target="_blank" rel="noopener">
+        <a class="link-btn link-apple" href="${(track.trackViewUrl||'').replace('https://', 'music://')}" rel="noopener">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M10 5.2 7.5 6.6V4.5L6.5 5.1v5.4l1-.65V7.55l2.5 1.45V7.4L7.5 6.35 10 4.9V5.2z" fill="white"/></svg>
           Apple Music
         </a>
@@ -815,9 +909,10 @@ function replenish() {
   queueInfo.textContent = queue.length > 0 ? `${queue.length} more in queue` : '';
 
   if (cards.length === 0) {
-    stage.innerHTML = '<div class="done-card"><div style="font-size:2.5rem">🎵</div><div>No more suggestions</div></div>';
-  } else if (cards.length <= 1 && !loadingMore) {
-    fetchMore();
+    showLikedSongs();
+  } else {
+    playPreview(cards[0]._track);
+    if (cards.length <= 1 && !loadingMore) fetchMore();
   }
 }
 
@@ -841,6 +936,7 @@ function renderStack() {
   });
 
   queueInfo.textContent = queue.length > 0 ? `${queue.length} more in queue` : '';
+  if (cards.length > 0) playPreview(cards[0]._track);
   if (cards.length <= 1 && !loadingMore) fetchMore();
 }
 
@@ -900,6 +996,7 @@ function dismiss(action) {
 
   if (action === 'like' && card._track) {
     const t = card._track;
+    likedSongs.push(t);
     if (t.artistName && !likedArtists.includes(t.artistName)) {
       likedArtists.push(t.artistName);
       fetchMore();
@@ -917,6 +1014,14 @@ function dismiss(action) {
   card.classList.add(action === 'like' ? 'fly-right' : 'fly-left');
   card.addEventListener('transitionend', () => card.remove(), { once: true });
 }
+
+// ── Mute ──
+document.getElementById('muteBtn').addEventListener('click', () => {
+  audioMuted = !audioMuted;
+  document.getElementById('muteBtn').textContent = audioMuted ? '🔇' : '🔊';
+  if (audioMuted) stopPreview();
+  else if (cards[0]) playPreview(cards[0]._track);
+});
 
 // ── Controls ──
 nopeBtn.addEventListener('click', () => dismiss('nope'));
@@ -956,7 +1061,9 @@ backBtn.addEventListener('click', () => {
   seen = new Set();
   likedArtists = [];
   likedGenres = [];
+  likedSongs = [];
   activeDrag = false;
+  stopPreview();
   goBtn.disabled = seeds.length === 0;
   extractBtn.textContent = 'Read songs from screenshot →';
   extractBtn.onclick = null;
