@@ -675,13 +675,28 @@ function parseSongsFromOCR(lines) {
   while (i < cleaned.length) {
     const title  = cleaned[i];
     const artist = cleaned[i + 1];
-    // Artist line is typically shorter than the title
     const skipNext = artist && artist.length <= title.length + 4;
-    const k = title.toLowerCase();
-    if (!seen.has(k)) { seen.add(k); result.push(title); }
+    const stripped = cleanSongTitle(title);
+    const k = stripped.toLowerCase();
+    if (stripped.length > 2 && !seen.has(k)) { seen.add(k); result.push(stripped); }
     i += skipNext ? 2 : 1;
   }
   return result;
+}
+
+function cleanSongTitle(title) {
+  return title
+    // Remove feat./ft. block anywhere — in or out of parens
+    .replace(/\s*[\(\[]?(?:feat\.|ft\.|featuring)[^\)\]]*[\)\]]?/gi, '')
+    // Remove version/remix/edit/etc. in parentheses or brackets
+    .replace(/\s*[\(\[][^\)\]]*\b(radio\s*edit|edit|extended|remix|mix|live|acoustic|instrumental|slowed|sped\s*up|remaster(?:ed)?|version|ver\.|cover|explicit|clean|single|original|club|bootleg|deluxe|bonus|interlude)\b[^\)\]]*[\)\]]/gi, '')
+    // Remove leftover empty parens
+    .replace(/\s*[\(\[\s]*[\)\]]/g, '')
+    // Remove trailing ellipsis (truncated OCR text)
+    .replace(/\.{2,}$/, '')
+    // Remove explicit badge
+    .replace(/\s*\[?E\]?\s*$/, '')
+    .trim();
 }
 
 function useSongsFromExtract() {
