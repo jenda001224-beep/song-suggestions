@@ -509,6 +509,7 @@
   <p class="hint">Swipe or use ← → keys · Tap links to open</p>
   <div style="display:flex;gap:12px;align-items:center">
     <button id="backBtn">← Start over</button>
+    <button id="endBtn" title="Show liked songs">Done ✓</button>
     <button id="muteBtn" title="Mute preview">🔊</button>
   </div>
 </div>
@@ -522,6 +523,8 @@ let activeDrag = false;
 let likedSongs = [];
 let currentAudio = null;
 let audioMuted = false;
+let seedMatchMap = {};     // OCR string → matched iTunes track object
+let preMatchedTracks = []; // pre-fetched tracks from screenshot to skip re-search
 
 // ── DOM refs ──
 const setupEl = document.getElementById('setup');
@@ -716,14 +719,35 @@ extractBtn.addEventListener('click', async () => {
 
     if (!songs.length) throw new Error('No songs found — try a clearer screenshot');
 
+    // Show OCR results immediately so user sees progress
     extractedList.innerHTML = songs.map((s, i) => `
-      <div class="song-row">
+      <div class="song-row" id="row${i}">
         <input type="checkbox" id="ex${i}" value="${s.replace(/"/g, '&quot;')}" checked>
-        <label for="ex${i}" style="cursor:pointer">${s}</label>
+        <label for="ex${i}" style="cursor:pointer;color:#666">${s} <span style="font-size:.75rem">matching…</span></label>
       </div>
     `).join('');
     extractedList.style.display = 'block';
-    extractStatus.textContent = `Found ${songs.length} songs — uncheck any to skip`;
+    extractStatus.textContent = `Found ${songs.length} songs — matching against database…`;
+
+    // Auto-match each OCR result against iTunes in parallel
+    seedMatchMap = {};
+    preMatchedTracks = [];
+    const matched = await Promise.all(songs.map(s =>
+      itunesSearch(s, 1).then(res => ({ ocr: s, track: res[0] || null }))
+    ));
+    matched.forEach((m, i) => {
+      const row = document.getElementById(`row${i}`);
+      if (!row) return;
+      const label = row.querySelector('label');
+      if (m.track) {
+        seedMatchMap[m.ocr] = m.track;
+        preMatchedTracks.push(m.track);
+        label.innerHTML = `<strong>${m.track.trackName}</strong> <span style="color:#888">— ${m.track.artistName}</span>`;
+      } else {
+        label.innerHTML = `<span style="color:#666">${m.ocr} <span style="font-size:.75rem;color:#444">(not found)</span></span>`;
+      }
+    });
+    extractStatus.textContent = `Matched ${preMatchedTracks.length} of ${songs.length} songs — uncheck any to skip`;
 
     extractBtn.textContent = 'Use these songs →';
     extractBtn.disabled = false;
@@ -808,10 +832,17 @@ function cleanSongTitle(title) {
 
 function useSongsFromExtract() {
   seeds.length = 0;
+  // Only keep preMatchedTracks for checked items
+  const checkedOcr = new Set();
   extractedList.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
-    const song = cb.value.split(' - ')[0].trim();
-    if (song && !seeds.includes(song)) seeds.push(song);
+    checkedOcr.add(cb.value);
+    const matched = seedMatchMap[cb.value];
+    const name = matched ? matched.trackName : cb.value.split(' - ')[0].trim();
+    if (name && !seeds.includes(name)) seeds.push(name);
   });
+  preMatchedTracks = preMatchedTracks.filter(t =>
+    [...checkedOcr].some(ocr => seedMatchMap[ocr] === t)
+  );
   renderTags();
 
   // Reset extract btn
@@ -919,7 +950,7 @@ function spotifyUrl(track, artist) {
 }
 
 // ── Queue ──
-function seenKey(t) { return `${t.trackName}|||${t.artistName}`.toLowerCase(); }
+function seenKey(t) { return `${cleanSongTitle(t.trackName||'')}|||${(t.artistName||'')}`.toLowerCase(); }
 function addToQueue(tracks) {
   for (const t of tracks) {
     const k = seenKey(t);
@@ -937,14 +968,26 @@ function setProgress(pct, msg) {
 async function fetchInitial() {
   const artists = new Set(), genres = new Set();
 
-  for (let i = 0; i < seeds.length; i++) {
-    setProgress(Math.round((i / seeds.length) * 40), `Looking up "${seeds[i]}"…`);
-    const res = await itunesSearch(seeds[i], 5);
+  // Use pre-matched tracks from screenshot (skip re-searching)
+  const preMatchedNames = new Set();
+  for (const t of preMatchedTracks) {
+    if (t.artistName) artists.add(t.artistName);
+    if (t.primaryGenreName) genres.add(t.primaryGenreName);
+    seen.add(seenKey(t));
+    preMatchedNames.add(t.trackName.toLowerCase());
+  }
+  preMatchedTracks = [];
+
+  // Search remaining seeds that weren't pre-matched
+  const remainingSeeds = seeds.filter(s => !preMatchedNames.has(s.toLowerCase()));
+  for (let i = 0; i < remainingSeeds.length; i++) {
+    setProgress(Math.round((i / Math.max(remainingSeeds.length, 1)) * 40), `Looking up "${remainingSeeds[i]}"…`);
+    const res = await itunesSearch(remainingSeeds[i], 5);
     if (res.length) {
       const t = res[0];
       if (t.artistName) artists.add(t.artistName);
       if (t.primaryGenreName) genres.add(t.primaryGenreName);
-      seen.add(seenKey(t)); // only block the exact seed song, not all results
+      seen.add(seenKey(t));
     }
   }
 
@@ -991,6 +1034,22 @@ function shuffle(arr) {
 }
 
 // ── Audio preview ──
+let audioUnlocked = false;
+document.addEventListener('touchstart', function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    ctx.close();
+  } catch {}
+  if (cards[0]?._track) playPreview(cards[0]._track);
+}, { once: true, passive: true });
+
 function playPreview(track) {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   if (!track?.previewUrl || audioMuted) return;
@@ -1207,6 +1266,7 @@ document.getElementById('muteBtn').addEventListener('click', () => {
 // ── Controls ──
 nopeBtn.addEventListener('click', () => dismiss('nope'));
 likeBtn.addEventListener('click', () => dismiss('like'));
+document.getElementById('endBtn').addEventListener('click', showLikedSongs);
 document.addEventListener('keydown', e => {
   if (!swipeEl.style.display || swipeEl.style.display === 'none') return;
   if (e.key === 'ArrowRight') dismiss('like');
@@ -1244,6 +1304,8 @@ backBtn.addEventListener('click', () => {
   likedGenres = [];
   likedSongs = [];
   activeDrag = false;
+  seedMatchMap = {};
+  preMatchedTracks = [];
   stopPreview();
   goBtn.disabled = seeds.length === 0;
   extractBtn.textContent = 'Read songs from screenshot →';
