@@ -1143,7 +1143,7 @@ function showLikedSongs() {
         <div class="liked-title">${t._fire ? '🔥 ' : ''}${t.trackName}</div>
         <div class="liked-artist">${t.artistName}</div>
       </div>
-      <button class="copy-btn" onclick="copyLiked(this, ${i})">Copy</button>
+      <a class="copy-btn" href="${(t.trackViewUrl||'').replace('https://', 'music://')}" target="_blank" rel="noopener">♫ Apple Music</a>
     </div>
   `).join('');
   stage.innerHTML = `<div class="liked-list"><h2>❤️ Songs you liked (${likedSongs.length})</h2>${rows}</div>`;
@@ -1321,15 +1321,24 @@ function makeDraggable(card) {
     isDragging = false;
     activeDrag = false;
     card.classList.remove('is-dragging');
-    card.style.transition = '';
 
     const goingUp = curY < -80 && Math.abs(curY) > Math.abs(curX) * 0.8;
 
     if (goingUp) {
+      card.style.transition = '';
       document.getElementById('fireBtn').click();
     } else if (Math.abs(curX) > 80) {
-      dismiss(curX > 0 ? 'like' : 'nope');
+      const action = curX > 0 ? 'like' : 'nope';
+      applyDismissState(action, card);
+      const targetX = action === 'like' ? '150%' : '-150%';
+      const rot = action === 'like' ? 22 : -22;
+      card.style.pointerEvents = 'none';
+      card.style.transition = 'transform 0.38s ease, opacity 0.38s ease';
+      card.style.transform = `translateX(${targetX}) rotate(${rot}deg)`;
+      card.style.opacity = '0';
+      card.addEventListener('transitionend', () => card.remove(), { once: true });
     } else {
+      card.style.transition = '';
       card.style.transform = '';
       card.querySelector('.like-label').style.opacity = 0;
       card.querySelector('.nope-label').style.opacity = 0;
@@ -1344,10 +1353,7 @@ function makeDraggable(card) {
   card.addEventListener('pointercancel', onUp);
 }
 
-function dismiss(action) {
-  if (cards.length === 0) return;
-  const card = cards[0];
-
+function applyDismissState(action, card) {
   if ((action === 'like' || action === 'fire') && card._track) {
     const t = card._track;
     t._fire = action === 'fire';
@@ -1360,7 +1366,6 @@ function dismiss(action) {
       likedGenres.push(t.primaryGenreName);
     }
     if (action === 'fire' && t.artistName) {
-      // Super boost: flood queue with this artist
       itunesSearch(t.artistName, 100, { mbFallback: false }).then(r => {
         addToQueue(r); shuffle(queue);
       });
@@ -1369,9 +1374,14 @@ function dismiss(action) {
       card.appendChild(ripple);
     }
   }
-
   cards.shift();
   replenish();
+}
+
+function dismiss(action) {
+  if (cards.length === 0) return;
+  const card = cards[0];
+  applyDismissState(action, card);
 
   card.classList.add(action === 'fire' ? 'fly-fire' : action === 'like' ? 'fly-right' : 'fly-left');
   card.addEventListener('transitionend', () => card.remove(), { once: true });
