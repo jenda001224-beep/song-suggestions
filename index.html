@@ -1067,10 +1067,7 @@ const previewAudio = new Audio();
 previewAudio.volume = 0.6;
 
 document.addEventListener('touchstart', function unlockAudio() {
-  // Play + immediately pause to unlock the element on iOS
-  previewAudio.play().catch(() => {});
-  previewAudio.pause();
-  if (cards[0]?._track) playPreview(cards[0]._track);
+  if (!audioMuted && cards[0]?._track) playPreview(cards[0]._track);
 }, { once: true, passive: true });
 
 function playPreview(track) {
