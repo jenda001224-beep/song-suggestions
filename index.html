@@ -954,7 +954,7 @@ function seenKey(t) { return `${cleanSongTitle(t.trackName||'')}|||${(t.artistNa
 function addToQueue(tracks) {
   for (const t of tracks) {
     const k = seenKey(t);
-    if (!seen.has(k) && t.trackViewUrl) { seen.add(k); queue.push(t); }
+    if (!seen.has(k) && t.trackViewUrl && t.artworkUrl100) { seen.add(k); queue.push(t); }
   }
 }
 
