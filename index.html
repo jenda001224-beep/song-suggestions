@@ -912,9 +912,12 @@ function _firstNonEmpty(promises) {
 }
 
 async function itunesSearch(term, limit = 20, { mbFallback = true } = {}) {
-  // Race iTunes direct fetch vs JSONP — whichever returns results first wins
+  const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}`;
+  // Race direct fetch + codetabs proxy + JSONP — first non-empty result wins
   const results = await _firstNonEmpty([
-    fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=${limit}`)
+    fetch(itunesUrl)
+      .then(r => r.json()).then(d => (d.results || []).map(normalizeItunes)).catch(() => []),
+    fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(itunesUrl)}`)
       .then(r => r.json()).then(d => (d.results || []).map(normalizeItunes)).catch(() => []),
     _itunesJsonp(term, limit),
   ]);
@@ -1212,7 +1215,13 @@ function renderStack() {
   });
 
   queueInfo.textContent = queue.length > 0 ? `${queue.length} more in queue` : '';
-  if (cards.length > 0) playPreview(cards[0]._track);
+  if (cards.length > 0) {
+    playPreview(cards[0]._track);
+  } else if (queue.length === 0) {
+    if (loadingMore) return; // fetchMore will call renderStack again when done
+    showLikedSongs();
+    return;
+  }
   if (cards.length <= 1 && !loadingMore) fetchMore();
 }
 
