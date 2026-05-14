@@ -993,11 +993,11 @@ async function fetchInitial() {
   }
   preMatchedTracks = [];
 
-  // Search remaining seeds that weren't pre-matched
+  // Search remaining seeds — allow MusicBrainz so we can extract artist name on iOS
   const remainingSeeds = seeds.filter(s => !preMatchedNames.has(s.toLowerCase()));
   for (let i = 0; i < remainingSeeds.length; i++) {
     setProgress(Math.round((i / Math.max(remainingSeeds.length, 1)) * 40), `Looking up "${remainingSeeds[i]}"…`);
-    const res = await itunesSearch(remainingSeeds[i], 5, { mbFallback: false });
+    const res = await itunesSearch(remainingSeeds[i], 5);
     if (res.length) {
       const t = res[0];
       if (t.artistName) artists.add(t.artistName);
@@ -1023,6 +1023,15 @@ async function fetchInitial() {
     setProgress(90, 'Fetching viral charts…');
     const top = await fetchTopCharts();
     addToQueue(top);
+  }
+
+  // Broad fallback: if still thin, search seed titles directly
+  if (queue.length < 5) {
+    setProgress(95, 'Broadening search…');
+    const broadRes = await Promise.all(
+      seeds.slice(0, 3).map(s => itunesSearch(s, 50, { mbFallback: false }))
+    );
+    broadRes.forEach(r => addToQueue(r));
   }
 
   setProgress(100, `Found ${queue.length} songs!`);
@@ -1080,6 +1089,18 @@ function stopPreview() {
 // ── Liked songs screen ──
 function showLikedSongs() {
   stopPreview();
+  document.querySelector('.actions').style.visibility = 'hidden';
+
+  if (!likedSongs.length && queue.length === 0 && cards.length === 0) {
+    stage.innerHTML = `
+      <div class="done-card">
+        <div style="font-size:2.5rem">🔍</div>
+        <div style="font-size:1rem;font-weight:600;margin-top:8px">No songs found</div>
+        <div style="font-size:.8rem;color:#555;margin-top:6px">Try a more popular song or artist</div>
+      </div>`;
+    return;
+  }
+
   if (!likedSongs.length) {
     stage.innerHTML = '<div class="done-card"><div style="font-size:2.5rem">🎵</div><div>No more suggestions</div></div>';
     return;
@@ -1321,6 +1342,7 @@ backBtn.addEventListener('click', () => {
   activeDrag = false;
   seedMatchMap = {};
   preMatchedTracks = [];
+  document.querySelector('.actions').style.visibility = '';
   stopPreview();
   goBtn.disabled = seeds.length === 0;
   extractBtn.textContent = 'Read songs from screenshot →';
