@@ -205,6 +205,9 @@
       cursor: grab;
       transform-origin: center bottom;
       transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      will-change: transform;
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
     }
     .card.back { pointer-events: none; }
     .card.is-back-1 { transform: scale(0.95) translateY(12px); }
@@ -1260,21 +1263,41 @@ function renderStack() {
 // ── Drag ──
 function makeDraggable(card) {
   let startX = 0, startY = 0, curX = 0, curY = 0, isDragging = false;
+  let rafId = null;
+
+  // Cache label refs once — avoids querySelector on every frame
+  const likeLabel = card.querySelector('.like-label');
+  const nopeLabel = card.querySelector('.nope-label');
+  const fireLabel = card.querySelector('.fire-label');
 
   function setBackProgress(p) {
-    if (cards[1]) {
-      cards[1].style.transform = `scale(${0.95 + p * 0.05}) translateY(${12 - p * 12}px)`;
-      cards[1].style.transition = 'none';
-    }
-    if (cards[2]) {
-      cards[2].style.transform = `scale(${0.90 + p * 0.05}) translateY(${24 - p * 12}px)`;
-      cards[2].style.transition = 'none';
-    }
+    if (cards[1]) cards[1].style.transform = `scale(${0.95 + p * 0.05}) translateY(${12 - p * 12}px)`;
+    if (cards[2]) cards[2].style.transform = `scale(${0.90 + p * 0.05}) translateY(${24 - p * 12}px)`;
   }
 
   function resetBack() {
     if (cards[1]) { cards[1].style.transition = ''; cards[1].style.transform = ''; }
     if (cards[2]) { cards[2].style.transition = ''; cards[2].style.transform = ''; }
+  }
+
+  function applyDragFrame() {
+    rafId = null;
+    const goingUp = curY < 0 && Math.abs(curY) > Math.abs(curX) * 0.8;
+    if (goingUp) {
+      const p = Math.min(Math.abs(curY) / 80, 1);
+      card.style.transform = `translateX(${curX * 0.2}px) translateY(${curY}px) scale(${1 + p * 0.03})`;
+      fireLabel.style.opacity = p;
+      likeLabel.style.opacity = 0;
+      nopeLabel.style.opacity = 0;
+      setBackProgress(p);
+    } else {
+      const p = Math.min(Math.abs(curX) / 80, 1);
+      card.style.transform = `translateX(${curX}px) translateY(${curY * 0.2}px) rotate(${curX * 0.055}deg)`;
+      likeLabel.style.opacity = curX > 0 ? p : 0;
+      nopeLabel.style.opacity = curX < 0 ? p : 0;
+      fireLabel.style.opacity = 0;
+      setBackProgress(p);
+    }
   }
 
   function onDown(e) {
@@ -1288,38 +1311,23 @@ function makeDraggable(card) {
     curX = 0; curY = 0;
     card.classList.add('is-dragging');
     card.style.transition = 'none';
+    // Disable back card transitions for the duration of the drag
+    if (cards[1]) cards[1].style.transition = 'none';
+    if (cards[2]) cards[2].style.transition = 'none';
   }
 
   function onMove(e) {
     if (!isDragging) return;
-    const x = e.clientX ?? e.touches?.[0]?.clientX ?? startX;
-    const y = e.clientY ?? e.touches?.[0]?.clientY ?? startY;
-    curX = x - startX;
-    curY = y - startY;
-
-    const goingUp = curY < 0 && Math.abs(curY) > Math.abs(curX) * 0.8;
-
-    if (goingUp) {
-      const p = Math.min(Math.abs(curY) / 80, 1);
-      card.style.transform = `translateX(${curX * 0.2}px) translateY(${curY}px) scale(${1 + p * 0.03})`;
-      card.querySelector('.fire-label').style.opacity = p;
-      card.querySelector('.like-label').style.opacity = 0;
-      card.querySelector('.nope-label').style.opacity = 0;
-      setBackProgress(p);
-    } else {
-      const p = Math.min(Math.abs(curX) / 80, 1);
-      card.style.transform = `translateX(${curX}px) translateY(${curY * 0.2}px) rotate(${curX * 0.055}deg)`;
-      card.querySelector('.like-label').style.opacity = curX > 0 ? p : 0;
-      card.querySelector('.nope-label').style.opacity = curX < 0 ? p : 0;
-      card.querySelector('.fire-label').style.opacity = 0;
-      setBackProgress(p);
-    }
+    curX = (e.clientX ?? e.touches?.[0]?.clientX ?? startX) - startX;
+    curY = (e.clientY ?? e.touches?.[0]?.clientY ?? startY) - startY;
+    if (!rafId) rafId = requestAnimationFrame(applyDragFrame);
   }
 
   function onUp() {
     if (!isDragging) return;
     isDragging = false;
     activeDrag = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     card.classList.remove('is-dragging');
 
     const goingUp = curY < -80 && Math.abs(curY) > Math.abs(curX) * 0.8;
@@ -1333,16 +1341,16 @@ function makeDraggable(card) {
       const targetX = action === 'like' ? '150%' : '-150%';
       const rot = action === 'like' ? 22 : -22;
       card.style.pointerEvents = 'none';
-      card.style.transition = 'transform 0.38s ease, opacity 0.38s ease';
+      card.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.4s ease';
       card.style.transform = `translateX(${targetX}) rotate(${rot}deg)`;
       card.style.opacity = '0';
       card.addEventListener('transitionend', () => card.remove(), { once: true });
     } else {
-      card.style.transition = '';
+      card.style.transition = 'transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
       card.style.transform = '';
-      card.querySelector('.like-label').style.opacity = 0;
-      card.querySelector('.nope-label').style.opacity = 0;
-      card.querySelector('.fire-label').style.opacity = 0;
+      likeLabel.style.opacity = 0;
+      nopeLabel.style.opacity = 0;
+      fireLabel.style.opacity = 0;
       resetBack();
     }
   }
