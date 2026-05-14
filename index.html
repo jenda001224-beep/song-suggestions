@@ -1061,32 +1061,28 @@ function shuffle(arr) {
 }
 
 // ── Audio preview ──
-let audioUnlocked = false;
+// One persistent Audio element — once unlocked by a user gesture iOS allows
+// reuse with new src without needing another gesture each time.
+const previewAudio = new Audio();
+previewAudio.volume = 0.6;
+
 document.addEventListener('touchstart', function unlockAudio() {
-  if (audioUnlocked) return;
-  audioUnlocked = true;
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const buf = ctx.createBuffer(1, 1, 22050);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    src.start(0);
-    ctx.close();
-  } catch {}
+  // Play + immediately pause to unlock the element on iOS
+  previewAudio.play().catch(() => {});
+  previewAudio.pause();
   if (cards[0]?._track) playPreview(cards[0]._track);
 }, { once: true, passive: true });
 
 function playPreview(track) {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  if (!track?.previewUrl || audioMuted) return;
-  currentAudio = new Audio(track.previewUrl);
-  currentAudio.volume = 0.6;
-  currentAudio.play().catch(() => {});
+  if (!track?.previewUrl || audioMuted) { previewAudio.pause(); return; }
+  if (previewAudio.src === track.previewUrl && !previewAudio.paused) return;
+  previewAudio.src = track.previewUrl;
+  previewAudio.play().catch(() => {});
 }
 
 function stopPreview() {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  previewAudio.pause();
+  previewAudio.src = '';
 }
 
 // ── Liked songs screen ──
