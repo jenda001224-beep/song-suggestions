@@ -1143,7 +1143,7 @@ function showLikedSongs() {
         <div class="liked-title">${t._fire ? '🔥 ' : ''}${t.trackName}</div>
         <div class="liked-artist">${t.artistName}</div>
       </div>
-      <a class="copy-btn" href="${(t.trackViewUrl||'').replace('https://', 'music://')}" target="_blank" rel="noopener">♫ Apple Music</a>
+      <a class="copy-btn" href="${(t.trackViewUrl||'').replace('https://', 'music://')}" target="_blank" rel="noopener" style="background:#fc3c44;border-color:#fc3c44;color:#fff;text-decoration:none">♫ Apple Music</a>
     </div>
   `).join('');
   stage.innerHTML = `<div class="liked-list"><h2>❤️ Songs you liked (${likedSongs.length})</h2>${rows}</div>`;
