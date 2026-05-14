@@ -283,6 +283,12 @@
     }
     .like-label { right: 24px; color: #3ddc84; border-color: #3ddc84; transform: rotate(15deg); }
     .nope-label { left: 24px; color: #fc3c44; border-color: #fc3c44; transform: rotate(-15deg); }
+    .fire-label {
+      position: absolute; top: 28px; left: 50%; transform: translateX(-50%);
+      font-size: 1.4rem; font-weight: 800; letter-spacing: 0.05em;
+      border: 3px solid #ff6b00; border-radius: 8px; padding: 4px 14px;
+      color: #ff6b00; opacity: 0; pointer-events: none;
+    }
 
     .actions { display: flex; gap: 20px; align-items: center; margin-bottom: 14px; }
     .act-btn {
@@ -1162,6 +1168,7 @@ function buildCard(track) {
     ${artUrl ? `<img class="card-art" src="${artUrl}" alt="">` : `<div class="card-art-placeholder">🎵</div>`}
     <div class="like-label">LIKE</div>
     <div class="nope-label">NOPE</div>
+    <div class="fire-label">🔥 FIRE</div>
     <div class="card-body">
       <div class="card-title">${track.trackName}</div>
       <div class="card-artist">${track.artistName}</div>
@@ -1200,6 +1207,8 @@ function replenish() {
 
   cards.forEach((c, i) => {
     c.style.zIndex = cards.length - i;
+    c.style.transform = '';   // clear drag-set inline transform → CSS class takes over smoothly
+    c.style.transition = '';  // restore CSS transition
     c.classList.remove('back', 'is-back-1', 'is-back-2');
     if (i > 0) {
       c.classList.add('back');
@@ -1250,7 +1259,23 @@ function renderStack() {
 
 // ── Drag ──
 function makeDraggable(card) {
-  let startX = 0, startY = 0, curX = 0, isDragging = false;
+  let startX = 0, startY = 0, curX = 0, curY = 0, isDragging = false;
+
+  function setBackProgress(p) {
+    if (cards[1]) {
+      cards[1].style.transform = `scale(${0.95 + p * 0.05}) translateY(${12 - p * 12}px)`;
+      cards[1].style.transition = 'none';
+    }
+    if (cards[2]) {
+      cards[2].style.transform = `scale(${0.90 + p * 0.05}) translateY(${24 - p * 12}px)`;
+      cards[2].style.transition = 'none';
+    }
+  }
+
+  function resetBack() {
+    if (cards[1]) { cards[1].style.transition = ''; cards[1].style.transform = ''; }
+    if (cards[2]) { cards[2].style.transition = ''; cards[2].style.transform = ''; }
+  }
 
   function onDown(e) {
     if (card.classList.contains('back')) return;
@@ -1260,7 +1285,7 @@ function makeDraggable(card) {
     isDragging = true;
     startX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     startY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    curX = 0;
+    curX = 0; curY = 0;
     card.classList.add('is-dragging');
     card.style.transition = 'none';
   }
@@ -1270,11 +1295,25 @@ function makeDraggable(card) {
     const x = e.clientX ?? e.touches?.[0]?.clientX ?? startX;
     const y = e.clientY ?? e.touches?.[0]?.clientY ?? startY;
     curX = x - startX;
-    const curY = y - startY;
-    card.style.transform = `translateX(${curX}px) translateY(${curY * 0.25}px) rotate(${curX * 0.055}deg)`;
-    const p = Math.min(Math.abs(curX) / 80, 1);
-    card.querySelector('.like-label').style.opacity = curX > 0 ? p : 0;
-    card.querySelector('.nope-label').style.opacity = curX < 0 ? p : 0;
+    curY = y - startY;
+
+    const goingUp = curY < 0 && Math.abs(curY) > Math.abs(curX) * 0.8;
+
+    if (goingUp) {
+      const p = Math.min(Math.abs(curY) / 80, 1);
+      card.style.transform = `translateX(${curX * 0.2}px) translateY(${curY}px) scale(${1 + p * 0.03})`;
+      card.querySelector('.fire-label').style.opacity = p;
+      card.querySelector('.like-label').style.opacity = 0;
+      card.querySelector('.nope-label').style.opacity = 0;
+      setBackProgress(p);
+    } else {
+      const p = Math.min(Math.abs(curX) / 80, 1);
+      card.style.transform = `translateX(${curX}px) translateY(${curY * 0.2}px) rotate(${curX * 0.055}deg)`;
+      card.querySelector('.like-label').style.opacity = curX > 0 ? p : 0;
+      card.querySelector('.nope-label').style.opacity = curX < 0 ? p : 0;
+      card.querySelector('.fire-label').style.opacity = 0;
+      setBackProgress(p);
+    }
   }
 
   function onUp() {
@@ -1283,12 +1322,19 @@ function makeDraggable(card) {
     activeDrag = false;
     card.classList.remove('is-dragging');
     card.style.transition = '';
-    if (Math.abs(curX) > 80) {
+
+    const goingUp = curY < -80 && Math.abs(curY) > Math.abs(curX) * 0.8;
+
+    if (goingUp) {
+      document.getElementById('fireBtn').click();
+    } else if (Math.abs(curX) > 80) {
       dismiss(curX > 0 ? 'like' : 'nope');
     } else {
       card.style.transform = '';
       card.querySelector('.like-label').style.opacity = 0;
       card.querySelector('.nope-label').style.opacity = 0;
+      card.querySelector('.fire-label').style.opacity = 0;
+      resetBack();
     }
   }
 
