@@ -299,6 +299,34 @@
     .act-btn:active { transform: scale(0.93); }
     .btn-nope { background: #1e1e1e; color: #fc3c44; }
     .btn-like { background: #1e1e1e; color: #3ddc84; }
+    .btn-fire {
+      background: #1e1e1e; color: #ff6b00;
+      width: 52px; height: 52px; font-size: 1.4rem;
+      box-shadow: 0 4px 24px rgba(255,107,0,0.25);
+    }
+    @keyframes firePop {
+      0%   { transform: scale(1); }
+      25%  { transform: scale(1.55) rotate(-8deg); }
+      55%  { transform: scale(0.88) rotate(5deg); }
+      80%  { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+    .btn-fire.firing { animation: firePop 0.45s cubic-bezier(0.36,0.07,0.19,0.97); }
+    .card.fly-fire {
+      transition: transform 0.5s cubic-bezier(0.215, 0.61, 0.355, 1), opacity 0.45s ease !important;
+      transform: translateY(-180%) translateX(15%) rotate(12deg) scale(1.04) !important;
+      opacity: 0;
+      pointer-events: none;
+    }
+    @keyframes fireRipple {
+      0%   { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+    .fire-ripple {
+      position: absolute; inset: 0; border-radius: 20px;
+      border: 3px solid #ff6b00; pointer-events: none;
+      animation: fireRipple 0.55s ease-out forwards;
+    }
 
     .hint { font-size: 0.72rem; color: #333; text-align: center; margin-bottom: 18px; }
     .queue-info { font-size: 0.72rem; color: #3a3a3a; margin-bottom: 10px; }
@@ -519,6 +547,7 @@
   <p class="queue-info" id="queueInfo"></p>
   <div class="actions">
     <button class="act-btn btn-nope" id="nopeBtn">✕</button>
+    <button class="act-btn btn-fire" id="fireBtn">🔥</button>
     <button class="act-btn btn-like" id="likeBtn">♥</button>
   </div>
   <p class="hint">Swipe or use ← → keys · Tap links to open</p>
@@ -1105,7 +1134,7 @@ function showLikedSongs() {
   const rows = likedSongs.map((t, i) => `
     <div class="liked-row">
       <div class="liked-info">
-        <div class="liked-title">${t.trackName}</div>
+        <div class="liked-title">${t._fire ? '🔥 ' : ''}${t.trackName}</div>
         <div class="liked-artist">${t.artistName}</div>
       </div>
       <button class="copy-btn" onclick="copyLiked(this, ${i})">Copy</button>
@@ -1273,8 +1302,9 @@ function dismiss(action) {
   if (cards.length === 0) return;
   const card = cards[0];
 
-  if (action === 'like' && card._track) {
+  if ((action === 'like' || action === 'fire') && card._track) {
     const t = card._track;
+    t._fire = action === 'fire';
     likedSongs.push(t);
     if (t.artistName && !likedArtists.includes(t.artistName)) {
       likedArtists.push(t.artistName);
@@ -1283,14 +1313,21 @@ function dismiss(action) {
     if (t.primaryGenreName && !likedGenres.includes(t.primaryGenreName)) {
       likedGenres.push(t.primaryGenreName);
     }
+    if (action === 'fire' && t.artistName) {
+      // Super boost: flood queue with this artist
+      itunesSearch(t.artistName, 100, { mbFallback: false }).then(r => {
+        addToQueue(r); shuffle(queue);
+      });
+      const ripple = document.createElement('div');
+      ripple.className = 'fire-ripple';
+      card.appendChild(ripple);
+    }
   }
 
   cards.shift();
-
-  // Immediately fill the stack — next card is already visible during the fly animation
   replenish();
 
-  card.classList.add(action === 'like' ? 'fly-right' : 'fly-left');
+  card.classList.add(action === 'fire' ? 'fly-fire' : action === 'like' ? 'fly-right' : 'fly-left');
   card.addEventListener('transitionend', () => card.remove(), { once: true });
 }
 
@@ -1305,11 +1342,20 @@ document.getElementById('muteBtn').addEventListener('click', () => {
 // ── Controls ──
 nopeBtn.addEventListener('click', () => dismiss('nope'));
 likeBtn.addEventListener('click', () => dismiss('like'));
+document.getElementById('fireBtn').addEventListener('click', () => {
+  const btn = document.getElementById('fireBtn');
+  btn.classList.remove('firing');
+  void btn.offsetWidth; // reflow to restart animation
+  btn.classList.add('firing');
+  btn.addEventListener('animationend', () => btn.classList.remove('firing'), { once: true });
+  dismiss('fire');
+});
 document.getElementById('endBtn').addEventListener('click', showLikedSongs);
 document.addEventListener('keydown', e => {
   if (!swipeEl.style.display || swipeEl.style.display === 'none') return;
   if (e.key === 'ArrowRight') dismiss('like');
   if (e.key === 'ArrowLeft') dismiss('nope');
+  if (e.key === 'ArrowUp') document.getElementById('fireBtn').click();
 });
 
 // ── Start swipe ──
