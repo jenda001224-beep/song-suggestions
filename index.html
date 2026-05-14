@@ -204,10 +204,11 @@
       touch-action: none;
       cursor: grab;
       transform-origin: center bottom;
+      transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     }
     .card.back { pointer-events: none; }
-    .card.is-back-1 { transform: scale(0.95) translateY(10px); }
-    .card.is-back-2 { transform: scale(0.90) translateY(20px); }
+    .card.is-back-1 { transform: scale(0.95) translateY(12px); }
+    .card.is-back-2 { transform: scale(0.90) translateY(24px); }
     .card.is-dragging { cursor: grabbing; }
     .card.fly-right {
       transition: transform 0.38s ease, opacity 0.38s ease !important;
